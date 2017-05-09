@@ -11,16 +11,24 @@ const d = debug('electron-rebuild');
 
 const defaultMode = process.platform === 'win32' ? 'sequential' : 'parallel';
 
-const locateNodeGyp = async () => {
+const locateGypModule = async(cli: string) => {
   let testPath = __dirname;
   for (let upDir = 0; upDir <= 20; upDir++) {
-    const nodeGypTestPath = path.resolve(testPath, `node_modules/.bin/node-gyp${process.platform === 'win32' ? '.cmd' : ''}`);
+    const nodeGypTestPath = path.resolve(testPath, `node_modules/.bin/${cli}${process.platform === 'win32' ? '.cmd' : ''}`);
     if (await fs.exists(nodeGypTestPath)) {
       return nodeGypTestPath;
     }
     testPath = path.resolve(testPath, '..');
   }
   return null;
+};
+
+const locateNodeGyp = async () => {
+  return await locateGypModule('node-gyp');
+};
+
+const locateNodePreGyp = async () => {
+  return await locateGypModule('node-pre-gyp');
 };
 
 class Rebuilder {
@@ -92,8 +100,9 @@ class Rebuilder {
     }
 
     const nodeGypPath = await locateNodeGyp();
+    const nodePreGypPath = await locateNodePreGyp();
     if (!nodeGypPath) {
-      throw new Error('Could not locate node-gyp');
+      throw new Error('Could not locate node-gyp or node-pre-gyp');
     }
 
     const metaPath = path.resolve(modulePath, 'build', 'Release', '.forge-meta');
@@ -120,7 +129,7 @@ class Rebuilder {
       `--target=${this.electronVersion}`,
       `--arch=${this.arch}`,
       `--dist-url=${this.headerURL}`,
-      '--build-from-source',
+      nodePreGypPath ? '--fallback-to-build' : '--build-from-source',
     ];
 
     const modulePackageJson = await readPackageJson(modulePath);
@@ -146,7 +155,7 @@ class Rebuilder {
     });
 
     d('rebuilding', path.basename(modulePath), 'with args', rebuildArgs);
-    await spawnPromise(nodeGypPath, rebuildArgs, {
+    await spawnPromise(nodePreGypPath ? nodePreGypPath : nodeGypPath, rebuildArgs, {
       cwd: modulePath,
       env: Object.assign({}, process.env, {
         HOME: path.resolve(os.homedir(), '.electron-gyp'),
@@ -155,7 +164,7 @@ class Rebuilder {
         npm_config_runtime: 'electron',
         npm_config_arch: this.arch,
         npm_config_target_arch: this.arch,
-        npm_config_build_from_source: true,
+        npm_config_build_from_source: !nodePreGypPath,
       }),
     });
 
