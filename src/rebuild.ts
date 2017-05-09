@@ -6,6 +6,7 @@ import * as nodeAbi from 'node-abi';
 import * as os from 'os';
 import * as path from 'path';
 import { readPackageJson } from './read-package-json';
+import {isNullOrUndefined} from "util";
 
 const d = debug('electron-rebuild');
 
@@ -133,7 +134,7 @@ class Rebuilder {
     ];
 
     const modulePackageJson = await readPackageJson(modulePath);
-
+    const preGypReady = !isNullOrUndefined(modulePackageJson.binary);
     Object.keys(modulePackageJson.binary || {}).forEach((binaryKey) => {
       let value = modulePackageJson.binary[binaryKey];
 
@@ -155,7 +156,7 @@ class Rebuilder {
     });
 
     d('rebuilding', path.basename(modulePath), 'with args', rebuildArgs);
-    await spawnPromise(nodePreGypPath ? nodePreGypPath : nodeGypPath, rebuildArgs, {
+    await spawnPromise(nodePreGypPath && preGypReady ? nodePreGypPath : nodeGypPath, rebuildArgs, {
       cwd: modulePath,
       env: Object.assign({}, process.env, {
         HOME: path.resolve(os.homedir(), '.electron-gyp'),
@@ -164,7 +165,7 @@ class Rebuilder {
         npm_config_runtime: 'electron',
         npm_config_arch: this.arch,
         npm_config_target_arch: this.arch,
-        npm_config_build_from_source: !nodePreGypPath,
+        npm_config_build_from_source: !(nodePreGypPath && preGypReady),
       }),
     });
 
