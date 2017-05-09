@@ -102,7 +102,7 @@ class Rebuilder {
 
     const nodeGypPath = await locateNodeGyp();
     const nodePreGypPath = await locateNodePreGyp();
-    if (!nodeGypPath) {
+    if (!nodeGypPath || !nodePreGypPath) {
       throw new Error('Could not locate node-gyp or node-pre-gyp');
     }
 
@@ -125,16 +125,17 @@ class Rebuilder {
       return;
     }
     d('rebuilding:', path.basename(modulePath));
+    const modulePackageJson = await readPackageJson(modulePath);
+    const preGypReady = !isNullOrUndefined(modulePackageJson.binary);
+
     const rebuildArgs = [
-      'rebuild',
+      preGypReady ? 'reinstall' : 'rebuild',
       `--target=${this.electronVersion}`,
       `--arch=${this.arch}`,
       `--dist-url=${this.headerURL}`,
-      nodePreGypPath ? '--fallback-to-build' : '--build-from-source',
+      preGypReady ? '--fallback-to-build' : '--build-from-source',
     ];
 
-    const modulePackageJson = await readPackageJson(modulePath);
-    const preGypReady = !isNullOrUndefined(modulePackageJson.binary);
     Object.keys(modulePackageJson.binary || {}).forEach((binaryKey) => {
       let value = modulePackageJson.binary[binaryKey];
 
@@ -146,7 +147,8 @@ class Rebuilder {
         .replace('{node_abi}', `electron-v${this.electronVersion.split('.').slice(0, 2).join('.')}`)
         .replace('{platform}', process.platform)
         .replace('{arch}', this.arch)
-        .replace('{version}', modulePackageJson.version);
+        .replace('{version}', modulePackageJson.version)
+        .replace('{name}', modulePackageJson.name);
 
       Object.keys(modulePackageJson.binary).forEach((binaryReplaceKey) => {
         value = value.replace(`{${binaryReplaceKey}}`, modulePackageJson.binary[binaryReplaceKey]);
@@ -156,7 +158,7 @@ class Rebuilder {
     });
 
     d('rebuilding', path.basename(modulePath), 'with args', rebuildArgs);
-    await spawnPromise(nodePreGypPath && preGypReady ? nodePreGypPath : nodeGypPath, rebuildArgs, {
+    await spawnPromise(preGypReady ? nodePreGypPath : nodeGypPath, rebuildArgs, {
       cwd: modulePath,
       env: Object.assign({}, process.env, {
         HOME: path.resolve(os.homedir(), '.electron-gyp'),
@@ -165,7 +167,7 @@ class Rebuilder {
         npm_config_runtime: 'electron',
         npm_config_arch: this.arch,
         npm_config_target_arch: this.arch,
-        npm_config_build_from_source: !(nodePreGypPath && preGypReady),
+        npm_config_build_from_source: !preGypReady,
       }),
     });
 
