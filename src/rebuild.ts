@@ -6,7 +6,7 @@ import * as nodeAbi from 'node-abi';
 import * as os from 'os';
 import * as path from 'path';
 import { readPackageJson } from './read-package-json';
-import {isNullOrUndefined} from "util";
+import {isNullOrUndefined} from 'util';
 
 const d = debug('electron-rebuild');
 
@@ -126,6 +126,8 @@ class Rebuilder {
     }
     d('rebuilding:', path.basename(modulePath));
     const modulePackageJson = await readPackageJson(modulePath);
+    const moduleName = path.basename(modulePath);
+    let moduleBinaryPath = path.resolve(modulePath, 'build/Release');
     const preGypReady = !isNullOrUndefined(modulePackageJson.binary);
 
     const rebuildArgs = [
@@ -139,16 +141,17 @@ class Rebuilder {
     Object.keys(modulePackageJson.binary || {}).forEach((binaryKey) => {
       let value = modulePackageJson.binary[binaryKey];
 
-      if (binaryKey === 'module_path') {
-        value = path.resolve(modulePath, value);
-      }
-
       value = value.replace('{configuration}', 'Release')
         .replace('{node_abi}', `electron-v${this.electronVersion.split('.').slice(0, 2).join('.')}`)
         .replace('{platform}', process.platform)
         .replace('{arch}', this.arch)
         .replace('{version}', modulePackageJson.version)
         .replace('{name}', modulePackageJson.name);
+
+      if (binaryKey === 'module_path') {
+        value = path.resolve(modulePath, value);
+        moduleBinaryPath = value;
+      }
 
       Object.keys(modulePackageJson.binary).forEach((binaryReplaceKey) => {
         value = value.replace(`{${binaryReplaceKey}}`, modulePackageJson.binary[binaryReplaceKey]);
@@ -157,7 +160,7 @@ class Rebuilder {
       rebuildArgs.push(`--${binaryKey}=${value}`);
     });
 
-    d('rebuilding', path.basename(modulePath), 'with args', rebuildArgs);
+    d('rebuilding', moduleName, 'with args', rebuildArgs);
     await spawnPromise(preGypReady ? nodePreGypPath : nodeGypPath, rebuildArgs, {
       cwd: modulePath,
       env: Object.assign({}, process.env, {
@@ -171,16 +174,14 @@ class Rebuilder {
       }),
     });
 
-    d('built:', path.basename(modulePath));
+    d('built:', moduleName);
     await fs.mkdirs(path.dirname(metaPath));
     await fs.writeFile(metaPath, metaData);
 
-    const moduleName = path.basename(modulePath);
-
-    d('searching for .node file', path.resolve(modulePath, 'build/Release'));
-    d('testing files', (await fs.readdir(path.resolve(modulePath, 'build/Release'))));
-    const nodePath = path.resolve(modulePath, 'build/Release',
-      (await fs.readdir(path.resolve(modulePath, 'build/Release')))
+    d('searching for .node file', moduleBinaryPath);
+    d('testing files', (await fs.readdir(moduleBinaryPath)));
+    const nodePath = path.resolve(moduleBinaryPath,
+      (await fs.readdir(moduleBinaryPath))
         .find((file) => file !== '.node' && file.endsWith('.node'))
       );
 
